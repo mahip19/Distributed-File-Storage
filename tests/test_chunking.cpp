@@ -5,7 +5,7 @@
 
 using namespace std;
 
-// Helper: create a test file of given size
+// create a test file of given size
 void CreateTestFile(const string &path, size_t size)
 {
     ofstream file(path, ios::binary);
