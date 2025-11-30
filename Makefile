@@ -18,7 +18,8 @@ COMMON_SRCS = $(COMMON_DIR)/FileUtils.cpp \
 COMMON_OBJS = $(BUILD_DIR)/FileUtils.o \
               $(BUILD_DIR)/HashUtils.o \
               $(BUILD_DIR)/TCPSocket.o \
-              $(BUILD_DIR)/ConsistentHash.o
+              $(BUILD_DIR)/ConsistentHash.o \
+			  $(BUILD_DIR)/NodeConfig.o
 
 # Test executables
 TEST_BINS = $(BUILD_DIR)/test_chunking \
