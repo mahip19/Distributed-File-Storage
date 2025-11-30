@@ -1,4 +1,4 @@
-package com.distributed.storage;
+package com.distributed.storage.network;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -29,10 +29,9 @@ public class TCPClient {
         }
     }
 
-    public boolean sendMessage(String message) {
+    public boolean sendData(byte[] data) {
         if (!connected) return false;
         try {
-            byte[] data = message.getBytes(StandardCharsets.UTF_8);
             out.writeInt(data.length); // 4 bytes length
             out.write(data);
             out.flush();
@@ -42,16 +41,26 @@ public class TCPClient {
         }
     }
 
-    public String recvMessage() {
-        if (!connected) return "";
+    public byte[] recvData() {
+        if (!connected) return null;
         try {
             int length = in.readInt();
             byte[] data = new byte[length];
             in.readFully(data);
-            return new String(data, StandardCharsets.UTF_8);
+            return data;
         } catch (IOException e) {
-            return "";
+            return null;
         }
+    }
+
+    public boolean sendMessage(String message) {
+        return sendData(message.getBytes(StandardCharsets.UTF_8));
+    }
+
+    public String recvMessage() {
+        byte[] data = recvData();
+        if (data == null) return "";
+        return new String(data, StandardCharsets.UTF_8);
     }
 
     public void close() {

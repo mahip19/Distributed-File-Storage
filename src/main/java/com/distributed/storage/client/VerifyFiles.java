@@ -1,4 +1,8 @@
-package com.distributed.storage;
+package com.distributed.storage.client;
+
+import com.distributed.storage.common.Chunk;
+import com.distributed.storage.common.FileUtils;
+import com.distributed.storage.common.HashUtils;
 
 import java.util.ArrayList;
 import java.util.List;

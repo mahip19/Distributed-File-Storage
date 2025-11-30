@@ -1,4 +1,4 @@
-package com.distributed.storage;
+package com.distributed.storage.dht;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,19 +33,52 @@ public class ConsistentHash {
         if (ring.isEmpty()) {
             return "";
         }
+        int pos = hashKey(key);
+        Map.Entry<Integer, String> entry = ring.ceilingEntry(pos);
+        if (entry == null) {
+            entry = ring.firstEntry();
+        }
+        return entry.getValue();
+    }
+
+    // Get k distinct nodes for replication (walking clockwise)
+    public List<String> getNodesForKey(String key, int k) {
+        List<String> nodes = new ArrayList<>();
+        if (ring.isEmpty()) return nodes;
 
         int pos = hashKey(key);
-
-        // Find the first node with position >= key's position
-        // This is "walking clockwise" on the ring
         Map.Entry<Integer, String> entry = ring.ceilingEntry(pos);
-
-        // If we've gone past the end, wrap around to the first node
+        
+        // Start from the found position (or wrap around)
         if (entry == null) {
             entry = ring.firstEntry();
         }
 
-        return entry.getValue();
+        // We need to iterate through the ring to find k distinct values
+        // Since multiple positions might map to the same physical node (if we had vnodes),
+        // but here we map pos -> address directly.
+        // However, we should handle the case where we have fewer nodes than k.
+        
+        // Get all entries in a list to iterate easily with wrapping
+        List<String> allValues = new ArrayList<>(ring.values());
+        // This list is sorted by position because ring is a TreeMap
+        
+        // But wait, ring.values() returns values in key order.
+        // We need to start from 'entry' and go clockwise.
+        
+        // Let's use the keys to iterate
+        List<Integer> keys = new ArrayList<>(ring.keySet());
+        int startIndex = keys.indexOf(entry.getKey());
+        
+        for (int i = 0; i < keys.size() && nodes.size() < k; i++) {
+            int currentIndex = (startIndex + i) % keys.size();
+            String node = ring.get(keys.get(currentIndex));
+            if (!nodes.contains(node)) {
+                nodes.add(node);
+            }
+        }
+        
+        return nodes;
     }
 
     // Get all nodes in the ring

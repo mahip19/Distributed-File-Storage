@@ -1,4 +1,4 @@
-package com.distributed.storage;
+package com.distributed.storage.network;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -56,11 +56,10 @@ public class TCPServer {
         }
     }
 
-    public boolean sendMessage(int clientId, String message) {
+    public boolean sendData(int clientId, byte[] data) {
         SocketContext ctx = clients.get(clientId);
         if (ctx == null) return false;
         try {
-            byte[] data = message.getBytes(StandardCharsets.UTF_8);
             ctx.out.writeInt(data.length);
             ctx.out.write(data);
             ctx.out.flush();
@@ -70,17 +69,27 @@ public class TCPServer {
         }
     }
 
-    public String recvMessage(int clientId) {
+    public byte[] recvData(int clientId) {
         SocketContext ctx = clients.get(clientId);
-        if (ctx == null) return "";
+        if (ctx == null) return null;
         try {
             int length = ctx.in.readInt();
             byte[] data = new byte[length];
             ctx.in.readFully(data);
-            return new String(data, StandardCharsets.UTF_8);
+            return data;
         } catch (IOException e) {
-            return "";
+            return null;
         }
+    }
+
+    public boolean sendMessage(int clientId, String message) {
+        return sendData(clientId, message.getBytes(StandardCharsets.UTF_8));
+    }
+
+    public String recvMessage(int clientId) {
+        byte[] data = recvData(clientId);
+        if (data == null) return "";
+        return new String(data, StandardCharsets.UTF_8);
     }
 
     public void closeClient(int clientId) {

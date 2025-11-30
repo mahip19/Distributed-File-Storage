@@ -1,4 +1,4 @@
-package com.distributed.storage;
+package com.distributed.storage.common;
 
 public class Chunk {
     public int index;              // position in file (0, 1, 2...)

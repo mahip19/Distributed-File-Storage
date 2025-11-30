@@ -1,4 +1,4 @@
-package com.distributed.storage;
+package com.distributed.storage.common;
 
 import java.io.*;
 import java.util.ArrayList;
