@@ -45,6 +45,45 @@ string ConsistentHash::GetNodeForKey(const string &key) const
     return it->second;
 }
 
+vector<string> ConsistentHash::GetNodesForKey(const string &key, int replicaCount) const
+{
+    vector<string> nodes;
+
+    if (ring.empty() || replicaCount <= 0)
+    {
+        return nodes;
+    }
+
+    // Don't ask for more replicas than we have nodes
+    int maxReplicas = min(replicaCount, (int)ring.size());
+
+    size_t pos = HashKey(key);
+
+    // Find the first node (starting point)
+    auto it = ring.lower_bound(pos);
+    if (it == ring.end())
+    {
+        it = ring.begin();
+    }
+
+    // Walk clockwise and collect nodes
+    while ((int)nodes.size() < maxReplicas)
+    {
+        nodes.push_back(it->second);
+
+        // Move to next node
+        ++it;
+
+        // Wrap around if we hit the end
+        if (it == ring.end())
+        {
+            it = ring.begin();
+        }
+    }
+
+    return nodes;
+}
+
 vector<string> ConsistentHash::GetAllNodes() const
 {
     vector<string> nodes;

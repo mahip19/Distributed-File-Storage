@@ -25,6 +25,8 @@ public:
     // Get the node responsible for a given key (CID)
     std::string GetNodeForKey(const std::string &key) const;
 
+    std::vector<std::string> GetNodesForKey(const std::string &key, int replicaCount) const;
+
     // Get all nodes in the ring
     std::vector<std::string> GetAllNodes() const;
 
