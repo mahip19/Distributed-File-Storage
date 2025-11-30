@@ -4,20 +4,28 @@ import com.distributed.storage.common.FileMetadata;
 import com.distributed.storage.network.TCPClient;
 import com.distributed.storage.network.TCPServer;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class MetadataNode {
+    public enum Role { HEAD, MIDDLE, TAIL, SINGLE }
+
     private TCPServer server;
     private ConcurrentHashMap<String, FileMetadata> metadataStore;
-    private boolean running;
+    private volatile boolean running;
     
-    // Chain Replication
+    // Chain Topology
     private String nextNodeIp;
     private int nextNodePort;
-    private boolean isTail;
+    
+    private String prevNodeIp;
+    private int prevNodePort;
+    
+    private String skipToIp;
+    private int skipToPort;
+    
+    private Role role;
+    private int myPort;
 
     public MetadataNode(String nextNodeIp, int nextNodePort) {
         this.server = new TCPServer();
@@ -25,16 +33,29 @@ public class MetadataNode {
         this.running = false;
         this.nextNodeIp = nextNodeIp;
         this.nextNodePort = nextNodePort;
-        this.isTail = (nextNodePort == -1);
+        this.prevNodeIp = "";
+        this.prevNodePort = -1;
+        this.skipToIp = "";
+        this.skipToPort = -1;
+        
+        if (nextNodePort == -1) {
+            this.role = Role.TAIL;
+        } else {
+            this.role = Role.HEAD; // Default to HEAD, will change to MIDDLE if we get a predecessor
+        }
     }
 
     public void start(int port) {
+        this.myPort = port;
         if (!server.start(port)) {
             System.err.println("Failed to start metadata node on port " + port);
             return;
         }
         running = true;
-        System.out.println("Metadata Node started on port " + port + (isTail ? " (TAIL)" : " -> " + nextNodeIp + ":" + nextNodePort));
+        System.out.println("Metadata Node started on port " + port + " Role: " + role + " Next: " + nextNodePort);
+
+        // Start Health Check Thread
+        new Thread(this::healthCheckLoop).start();
 
         while (running) {
             int clientId = server.acceptClient();
@@ -43,51 +64,145 @@ public class MetadataNode {
             }
         }
     }
+    
+    private void healthCheckLoop() {
+        while (running) {
+            try {
+                Thread.sleep(3000);
+                if (nextNodePort != -1) {
+                    if (!pingNext()) {
+                        System.out.println("Port " + myPort + ": Next node " + nextNodePort + " failed!");
+                        handleNextNodeFailure();
+                    }
+                }
+            } catch (InterruptedException e) {
+                break;
+            }
+        }
+    }
+    
+    private boolean pingNext() {
+        TCPClient client = new TCPClient();
+        if (!client.connect(nextNodeIp, nextNodePort)) return false;
+        if (!client.sendMessage("PING")) {
+            client.close();
+            return false;
+        }
+        String resp = client.recvMessage();
+        client.close();
+        return "PONG".equals(resp);
+    }
+    
+    private synchronized void handleNextNodeFailure() {
+        if (skipToPort != -1) {
+            System.out.println("Port " + myPort + ": Recovering using skip node -> " + skipToPort);
+            // Update next to skip
+            nextNodeIp = skipToIp;
+            nextNodePort = skipToPort;
+            
+            // Consume skip
+            skipToIp = "";
+            skipToPort = -1;
+            
+            // Notify new next that I am prev
+            notifyNextOfPredecessor();
+        } else {
+            System.out.println("Port " + myPort + ": No skip node. Becoming TAIL.");
+            nextNodeIp = "";
+            nextNodePort = -1;
+            role = (prevNodePort == -1) ? Role.SINGLE : Role.TAIL;
+        }
+    }
+    
+    private void notifyNextOfPredecessor() {
+        TCPClient client = new TCPClient();
+        if (client.connect(nextNodeIp, nextNodePort)) {
+            // UPDATE_PREV <myIp> <myPort>
+            // We assume localhost for IP in this simplified version if not known, 
+            // but let's try to send what we have.
+            // Since we don't know our own IP easily without config, we'll send "127.0.0.1" for now as per test env.
+            client.sendMessage("UPDATE_PREV 127.0.0.1 " + myPort);
+            client.close();
+        }
+    }
 
     private void handleClient(int clientId) {
         while (running) {
             String command = server.recvMessage(clientId);
             if (command.isEmpty()) break;
 
-            // Simple protocol:
-            // PUT <filename> <size> <chunkSize> <totalChunks> <rootHash> <hash1,hash2,...>
-            // GET <filename>
-
-            String[] parts = command.split(" ", 6); // Limit split for PUT
+            String[] parts = command.split(" ");
             String op = parts[0];
 
-            if ("PUT".equals(op) && parts.length == 6) {
-                handlePut(clientId, parts);
-            } else if ("GET".equals(op) && parts.length == 2) {
-                handleGet(clientId, parts[1]);
-            } else {
-                server.sendMessage(clientId, "ERROR");
+            switch (op) {
+                case "PUT":
+                    handlePut(clientId, command); // Pass full command to re-parse safely
+                    break;
+                case "GET":
+                    if (parts.length == 2) handleGet(clientId, parts[1]);
+                    break;
+                case "PING":
+                    server.sendMessage(clientId, "PONG");
+                    break;
+                case "UPDATE_PREV":
+                    if (parts.length == 3) {
+                        prevNodeIp = parts[1];
+                        prevNodePort = Integer.parseInt(parts[2]);
+                        if (role == Role.HEAD) role = Role.MIDDLE;
+                        if (role == Role.SINGLE) role = Role.TAIL;
+                        System.out.println("Port " + myPort + ": Updated prev to " + prevNodePort + ". New Role: " + role);
+                        server.sendMessage(clientId, "ACK");
+                    }
+                    break;
+                case "UPDATE_NEXT":
+                    if (parts.length == 3) {
+                        nextNodeIp = parts[1];
+                        nextNodePort = Integer.parseInt(parts[2]);
+                        if (role == Role.TAIL) role = Role.MIDDLE;
+                        if (role == Role.SINGLE) role = Role.HEAD;
+                        System.out.println("Port " + myPort + ": Updated next to " + nextNodePort + ". New Role: " + role);
+                        server.sendMessage(clientId, "ACK");
+                    }
+                    break;
+                case "SET_SKIP":
+                    if (parts.length == 3) {
+                        skipToIp = parts[1];
+                        skipToPort = Integer.parseInt(parts[2]);
+                        System.out.println("Port " + myPort + ": Set skip node to " + skipToPort);
+                        server.sendMessage(clientId, "ACK");
+                    }
+                    break;
+                case "GET_STATUS":
+                    server.sendMessage(clientId, "ROLE=" + role + " NEXT=" + nextNodePort + " PREV=" + prevNodePort);
+                    break;
+                case "DIE":
+                    System.out.println("Port " + myPort + ": Received DIE command. Stopping...");
+                    running = false;
+                    server.stop();
+                    break;
+                default:
+                    server.sendMessage(clientId, "ERROR");
             }
         }
         server.closeClient(clientId);
     }
 
-    private void handlePut(int clientId, String[] parts) {
+    private void handlePut(int clientId, String command) {
         try {
+            // PUT filename size chunkSize totalChunks rootHash hash1,hash2...
+            String[] parts = command.split(" ");
+            // Basic validation
+            if (parts.length < 7) {
+                server.sendMessage(clientId, "ERROR_ARGS");
+                return;
+            }
+            
             String filename = parts[1];
             long fileSize = Long.parseLong(parts[2]);
             int chunkSize = Integer.parseInt(parts[3]);
             int totalChunks = Integer.parseInt(parts[4]);
-            String rootHash = parts[5].split(" ")[0]; // In case there are more spaces
-            // The rest is hashes. Wait, split limit 6 puts all hashes in parts[5]?
-            // Actually, let's parse carefully.
-            // The command format: PUT filename size chunkSize totalChunks rootHash hash1,hash2,hash3
-            
-            // Re-parsing to be safe
-            String[] allParts = String.join(" ", parts).split(" ");
-            // This is messy if filename has spaces. Assume no spaces for now.
-            
-            filename = allParts[1];
-            fileSize = Long.parseLong(allParts[2]);
-            chunkSize = Integer.parseInt(allParts[3]);
-            totalChunks = Integer.parseInt(allParts[4]);
-            rootHash = allParts[5];
-            String hashesStr = allParts[6];
+            String rootHash = parts[5];
+            String hashesStr = parts[6];
             
             FileMetadata meta = new FileMetadata();
             meta.filename = filename;
@@ -99,12 +214,12 @@ public class MetadataNode {
 
             // 1. Store locally
             metadataStore.put(filename, meta);
-            System.out.println("Stored metadata for " + filename);
+            System.out.println("Port " + myPort + ": Stored metadata for " + filename);
 
             // 2. Forward to next node if not tail
             boolean success = true;
-            if (!isTail) {
-                success = forwardPut(allParts);
+            if (role != Role.TAIL && role != Role.SINGLE && nextNodePort != -1) {
+                success = forwardPut(command);
             }
 
             // 3. Ack to client
@@ -120,15 +235,13 @@ public class MetadataNode {
         }
     }
     
-    private boolean forwardPut(String[] parts) {
+    private boolean forwardPut(String command) {
         TCPClient client = new TCPClient();
         if (!client.connect(nextNodeIp, nextNodePort)) {
-            System.err.println("Failed to connect to next node " + nextNodeIp + ":" + nextNodePort);
+            System.err.println("Port " + myPort + ": Failed to forward to " + nextNodePort);
             return false;
         }
         
-        // Reconstruct command
-        String command = String.join(" ", parts);
         if (!client.sendMessage(command)) {
             client.close();
             return false;
@@ -140,13 +253,9 @@ public class MetadataNode {
     }
 
     private void handleGet(int clientId, String filename) {
-        // Only TAIL serves reads? Or any node?
-        // Plan says: "Reads are served exclusively by the TAIL to guarantee consistency."
-        if (!isTail) {
+        // Reads served by TAIL (or SINGLE)
+        if (role != Role.TAIL && role != Role.SINGLE) {
             server.sendMessage(clientId, "REDIRECT_TO_TAIL"); 
-            // In a real system we'd tell them where tail is, but let's assume client knows for now
-            // Or we could just proxy it.
-            // Let's enforce the rule: if not tail, error.
             return;
         }
 

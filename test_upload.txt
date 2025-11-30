@@ -1,1 +1,1 @@
-This is a distributed system test. Metadata should replicate. Chunks should replicate.
+Initial content before failure.

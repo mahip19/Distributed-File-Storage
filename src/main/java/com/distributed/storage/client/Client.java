@@ -258,51 +258,90 @@ public class Client {
     }
 
     public static void main(String[] args) {
-        // Full System Test
+        // Full System Test with Failure Recovery
         
         // 1. Start Storage Nodes
         startStorageNode(8001);
         startStorageNode(8002);
-        startStorageNode(8003);
         
         // 2. Start Metadata Nodes (Chain: 9001 -> 9002 -> 9003)
-        // Tail (9003) -> No next
+        // Tail (9003)
         startMetadataNode(9003, "", -1);
-        // Mid (9002) -> 9003
         try { Thread.sleep(500); } catch (Exception e) {}
-        startMetadataNode(9002, "127.0.0.1", 9003);
-        // Head (9001) -> 9002
-        try { Thread.sleep(500); } catch (Exception e) {}
-        startMetadataNode(9001, "127.0.0.1", 9002);
         
-        try { Thread.sleep(2000); } catch (InterruptedException e) {}
+        // Mid (9002) -> 9003
+        startMetadataNode(9002, "127.0.0.1", 9003);
+        try { Thread.sleep(500); } catch (Exception e) {}
+        
+        // Head (9001) -> 9002
+        startMetadataNode(9001, "127.0.0.1", 9002);
+        try { Thread.sleep(1000); } catch (Exception e) {}
 
+        // 3. Configure Skip Node on Head (9001) to point to Tail (9003) in case Mid (9002) fails
+        configureSkipNode(9001, "127.0.0.1", 9003);
+        
+        // 4. Initial Write (Before Failure)
         List<String> storageNodes = new ArrayList<>();
         storageNodes.add("127.0.0.1:8001");
         storageNodes.add("127.0.0.1:8002");
-        storageNodes.add("127.0.0.1:8003");
         
-        // Client connects to Head (9001) for writes, Tail (9003) for reads
         Client client = new Client(storageNodes, "127.0.0.1", 9001, "127.0.0.1", 9003);
         
         String testFile = "test_upload.txt";
         try {
-            Files.writeString(Path.of(testFile), "This is a distributed system test. Metadata should replicate. Chunks should replicate.");
+            Files.writeString(Path.of(testFile), "Initial content before failure.");
         } catch (IOException e) { e.printStackTrace(); }
 
-        System.out.println("\n--- Starting Upload ---");
+        System.out.println("\n--- Initial Upload ---");
         client.uploadFile(testFile);
         
-        System.out.println("\n--- Starting Download ---");
-        String outFile = "test_downloaded_final.txt";
-        client.downloadFile(testFile, outFile);
+        // 5. Kill Middle Node (9002)
+        System.out.println("\n--- KILLING MIDDLE NODE (9002) ---");
+        killNode(9002);
+        
+        // 6. Wait for Head (9001) to detect failure (ping interval 3s)
+        System.out.println("Waiting for failure detection (approx 5s)...");
+        try { Thread.sleep(5000); } catch (InterruptedException e) {}
+        
+        // 7. Write New Content (Should skip 9002 and go 9001 -> 9003)
+        System.out.println("\n--- Uploading Post-Failure Content ---");
+        String testFile2 = "test_upload_2.txt";
+        try {
+            Files.writeString(Path.of(testFile2), "Content written after Middle Node failure.");
+        } catch (IOException e) { e.printStackTrace(); }
+        
+        client.uploadFile(testFile2);
+        
+        // 8. Verify Read from Tail (9003)
+        System.out.println("\n--- Verifying Read from Tail ---");
+        String outFile2 = "test_downloaded_2.txt";
+        client.downloadFile(testFile2, outFile2);
         
         try {
-            String content = Files.readString(Path.of(outFile));
+            String content = Files.readString(Path.of(outFile2));
             System.out.println("Content: " + content);
         } catch (IOException e) {}
         
         System.exit(0);
+    }
+    
+    private static void configureSkipNode(int targetPort, String skipIp, int skipPort) {
+        TCPClient client = new TCPClient();
+        if (client.connect("127.0.0.1", targetPort)) {
+            client.sendMessage("SET_SKIP " + skipIp + " " + skipPort);
+            client.recvMessage(); // ACK
+            client.close();
+            System.out.println("Configured skip on " + targetPort + " -> " + skipPort);
+        }
+    }
+    
+    private static void killNode(int port) {
+         TCPClient client = new TCPClient();
+        if (client.connect("127.0.0.1", port)) {
+            client.sendMessage("DIE");
+            client.close();
+            System.out.println("Sent DIE to " + port);
+        }
     }
     
     private static void startStorageNode(int port) {
