@@ -12,25 +12,17 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 
 public class Client {
     private ConsistentHash dht;
-    
-    private String metadataHeadIp;
-    private int metadataHeadPort;
-    private String metadataTailIp;
-    private int metadataTailPort;
+    private List<String> metadataNodes; // Ordered chain: Head -> Mid -> Tail
 
-    public Client(List<String> storageNodes, String metaHeadIp, int metaHeadPort, String metaTailIp, int metaTailPort) {
+    public Client(List<String> storageNodes, List<String> metadataNodes) {
         dht = new ConsistentHash();
         for (String node : storageNodes) {
             dht.addNode(node);
         }
-        this.metadataHeadIp = metaHeadIp;
-        this.metadataHeadPort = metaHeadPort;
-        this.metadataTailIp = metaTailIp;
-        this.metadataTailPort = metaTailPort;
+        this.metadataNodes = metadataNodes;
     }
 
     public void uploadFile(String filepath) {
@@ -69,19 +61,33 @@ public class Client {
             }
         }
         
-        // 2. Upload Metadata to HEAD
-        if (putMetadata(filepath, chunks, rootHash)) {
-            System.out.println("Metadata uploaded successfully.");
-        } else {
-            System.err.println("Failed to upload metadata.");
+        // 2. Upload Metadata (Try nodes in order: Head -> Mid -> Tail)
+        boolean metadataSuccess = false;
+        for (String nodeAddr : metadataNodes) {
+            System.out.println("Trying to put metadata to " + nodeAddr);
+            if (putMetadataToNode(nodeAddr, filepath, chunks, rootHash)) {
+                System.out.println("Metadata uploaded successfully to " + nodeAddr);
+                metadataSuccess = true;
+                break;
+            } else {
+                System.err.println("Failed to connect/write to " + nodeAddr + ". Trying next...");
+            }
         }
         
-        System.out.println("Upload complete.");
+        if (!metadataSuccess) {
+            System.err.println("Failed to upload metadata to any node!");
+        } else {
+            System.out.println("Upload complete.");
+        }
     }
 
-    private boolean putMetadata(String filepath, List<Chunk> chunks, String rootHash) {
+    private boolean putMetadataToNode(String nodeAddr, String filepath, List<Chunk> chunks, String rootHash) {
+        String[] parts = nodeAddr.split(":");
+        String ip = parts[0];
+        int port = Integer.parseInt(parts[1]);
+
         TCPClient client = new TCPClient();
-        if (!client.connect(metadataHeadIp, metadataHeadPort)) {
+        if (!client.connect(ip, port)) {
             return false;
         }
         
@@ -100,15 +106,6 @@ public class Client {
         // Note: rootHash is String, so use %s
         String cmd = String.format("PUT %s %d %d %d %s %s", 
             file.getName(), size, chunkSize, totalChunks, rootHash, sb.toString());
-            
-        // Wait, the MetadataNode parsing expects: PUT filename size chunkSize totalChunks rootHash hash1,hash2...
-        // My format string has an extra %d? No.
-        // PUT %s(name) %d(size) %d(chunk) %d(total) %s(root) %s(hashes)
-        // Wait, I passed 5 args to format but used 6 placeholders?
-        // Ah, rootHash is string.
-        // PUT %s %d %d %d %s %s
-        
-        cmd = "PUT " + file.getName() + " " + size + " " + chunkSize + " " + totalChunks + " " + rootHash + " " + sb.toString();
 
         if (!client.sendMessage(cmd)) {
             client.close();
@@ -123,10 +120,23 @@ public class Client {
     public void downloadFile(String filename, String outputPath) {
         System.out.println("Downloading " + filename);
         
-        // 1. Get Metadata from TAIL
-        FileMetadata meta = getMetadata(filename);
+        // 1. Get Metadata from TAIL (Try reverse order for reads? Or just Tail?)
+        // Reads must be from Tail for consistency.
+        // If Tail is dead, the previous node should have become Tail.
+        // We iterate backwards through our list to find the active Tail.
+        
+        FileMetadata meta = null;
+        for (int i = metadataNodes.size() - 1; i >= 0; i--) {
+            String nodeAddr = metadataNodes.get(i);
+            meta = getMetadataFromNode(nodeAddr, filename);
+            if (meta != null) {
+                System.out.println("Retrieved metadata from " + nodeAddr);
+                break;
+            }
+        }
+        
         if (meta == null) {
-            System.err.println("File not found in metadata.");
+            System.err.println("File not found in metadata (or all nodes down).");
             return;
         }
         
@@ -164,14 +174,29 @@ public class Client {
         // 3. Reconstruct
         if (FileUtils.reconstructFile(chunks, outputPath)) {
             System.out.println("File reconstructed at " + outputPath);
+            
+            // 4. Intrinsic Integrity Verification
+            System.out.println("Verifying integrity...");
+            String computedCID = VerifyFiles.computeCID(outputPath);
+            if (computedCID.equals(meta.rootHash)) {
+                System.out.println("Integrity Verified: " + computedCID);
+            } else {
+                System.err.println("Integrity Check Failed!");
+                System.err.println("Expected: " + meta.rootHash);
+                System.err.println("Computed: " + computedCID);
+            }
         } else {
             System.err.println("Reconstruction failed.");
         }
     }
     
-    private FileMetadata getMetadata(String filename) {
+    private FileMetadata getMetadataFromNode(String nodeAddr, String filename) {
+        String[] parts = nodeAddr.split(":");
+        String ip = parts[0];
+        int port = Integer.parseInt(parts[1]);
+
         TCPClient client = new TCPClient();
-        if (!client.connect(metadataTailIp, metadataTailPort)) {
+        if (!client.connect(ip, port)) {
             return null;
         }
         
@@ -185,13 +210,13 @@ public class Client {
         
         if (response.startsWith("FOUND ")) {
             try {
-                String[] parts = response.split(" ");
+                String[] partsResp = response.split(" ");
                 FileMetadata meta = new FileMetadata();
-                meta.fileSize = Long.parseLong(parts[1]);
-                meta.chunkSize = Integer.parseInt(parts[2]);
-                meta.totalChunks = Integer.parseInt(parts[3]);
-                meta.rootHash = parts[4];
-                meta.chunkHashes = Arrays.asList(parts[5].split(","));
+                meta.fileSize = Long.parseLong(partsResp[1]);
+                meta.chunkSize = Integer.parseInt(partsResp[2]);
+                meta.totalChunks = Integer.parseInt(partsResp[3]);
+                meta.rootHash = partsResp[4];
+                meta.chunkHashes = Arrays.asList(partsResp[5].split(","));
                 return meta;
             } catch (Exception e) {
                 e.printStackTrace();
@@ -258,7 +283,7 @@ public class Client {
     }
 
     public static void main(String[] args) {
-        // Full System Test with Failure Recovery
+        // Full System Test with Head Failure Recovery
         
         // 1. Start Storage Nodes
         startStorageNode(8001);
@@ -277,50 +302,46 @@ public class Client {
         startMetadataNode(9001, "127.0.0.1", 9002);
         try { Thread.sleep(1000); } catch (Exception e) {}
 
-        // 3. Configure Skip Node on Head (9001) to point to Tail (9003) in case Mid (9002) fails
-        configureSkipNode(9001, "127.0.0.1", 9003);
-        
-        // 4. Initial Write (Before Failure)
+        // 3. Configure Client with Metadata Chain
         List<String> storageNodes = new ArrayList<>();
         storageNodes.add("127.0.0.1:8001");
         storageNodes.add("127.0.0.1:8002");
         
-        Client client = new Client(storageNodes, "127.0.0.1", 9001, "127.0.0.1", 9003);
+        List<String> metadataNodes = new ArrayList<>();
+        metadataNodes.add("127.0.0.1:9001");
+        metadataNodes.add("127.0.0.1:9002");
+        metadataNodes.add("127.0.0.1:9003");
         
+        Client client = new Client(storageNodes, metadataNodes);
+        
+        // 4. Initial Write (Normal)
         String testFile = "test_upload.txt";
         try {
-            Files.writeString(Path.of(testFile), "Initial content before failure.");
+            Files.writeString(Path.of(testFile), "Initial content.");
         } catch (IOException e) { e.printStackTrace(); }
 
         System.out.println("\n--- Initial Upload ---");
         client.uploadFile(testFile);
         
-        // 5. Kill Middle Node (9002)
-        System.out.println("\n--- KILLING MIDDLE NODE (9002) ---");
-        killNode(9002);
+        // 5. Kill HEAD Node (9001)
+        System.out.println("\n--- KILLING HEAD NODE (9001) ---");
+        killNode(9001);
+        try { Thread.sleep(2000); } catch (InterruptedException e) {}
         
-        // 6. Wait for Head (9001) to detect failure (ping interval 3s)
-        System.out.println("Waiting for failure detection (approx 5s)...");
-        try { Thread.sleep(5000); } catch (InterruptedException e) {}
-        
-        // 7. Write New Content (Should skip 9002 and go 9001 -> 9003)
-        System.out.println("\n--- Uploading Post-Failure Content ---");
-        String testFile2 = "test_upload_2.txt";
+        // 6. Write New Content (Should failover to 9002)
+        System.out.println("\n--- Uploading Post-Head-Failure Content ---");
+        String testFile2 = "test_upload_head_fail.txt";
         try {
-            Files.writeString(Path.of(testFile2), "Content written after Middle Node failure.");
+            Files.writeString(Path.of(testFile2), "Content written after Head Node failure.");
         } catch (IOException e) { e.printStackTrace(); }
         
         client.uploadFile(testFile2);
         
-        // 8. Verify Read from Tail (9003)
-        System.out.println("\n--- Verifying Read from Tail ---");
-        String outFile2 = "test_downloaded_2.txt";
+        // 7. Verify Read (Should find metadata on 9003 or 9002 depending on replication)
+        // Note: Since 9001 is dead, the write to 9002 should propagate to 9003.
+        System.out.println("\n--- Verifying Read ---");
+        String outFile2 = "test_downloaded_head_fail.txt";
         client.downloadFile(testFile2, outFile2);
-        
-        try {
-            String content = Files.readString(Path.of(outFile2));
-            System.out.println("Content: " + content);
-        } catch (IOException e) {}
         
         System.exit(0);
     }

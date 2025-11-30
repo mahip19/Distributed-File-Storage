@@ -1,1 +1,1 @@
-Initial content before failure.
+Initial content.
