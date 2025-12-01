@@ -26,6 +26,7 @@ public class MetadataNode {
     
     private Role role;
     private int myPort;
+    private java.util.concurrent.ExecutorService threadPool;
 
     public MetadataNode(String nextNodeIp, int nextNodePort) {
         this.server = new TCPServer();
@@ -37,6 +38,7 @@ public class MetadataNode {
         this.prevNodePort = -1;
         this.skipToIp = "";
         this.skipToPort = -1;
+        this.threadPool = java.util.concurrent.Executors.newFixedThreadPool(50);
         
         if (nextNodePort == -1) {
             this.role = Role.TAIL;
@@ -60,7 +62,7 @@ public class MetadataNode {
         while (running) {
             int clientId = server.acceptClient();
             if (clientId != -1) {
-                new Thread(() -> handleClient(clientId)).start();
+                threadPool.submit(() -> handleClient(clientId));
             }
         }
     }

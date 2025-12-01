@@ -7,11 +7,13 @@ public class StorageNode {
     private TCPServer server;
     private ConcurrentHashMap<String, byte[]> storage;
     private boolean running;
+    private java.util.concurrent.ExecutorService threadPool;
 
     public StorageNode() {
         server = new TCPServer();
         storage = new ConcurrentHashMap<>();
         running = false;
+        threadPool = java.util.concurrent.Executors.newFixedThreadPool(50);
     }
 
     public void start(int port) {
@@ -25,7 +27,7 @@ public class StorageNode {
         while (running) {
             int clientId = server.acceptClient();
             if (clientId != -1) {
-                new Thread(() -> handleClient(clientId)).start();
+                threadPool.submit(() -> handleClient(clientId));
             }
         }
     }

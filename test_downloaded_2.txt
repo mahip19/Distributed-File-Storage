@@ -1,1 +1,0 @@
-Content written after Middle Node failure.
