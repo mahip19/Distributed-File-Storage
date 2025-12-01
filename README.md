@@ -2,6 +2,15 @@
 
 A distributed file storage system implementing **Consistent Hashing** for data distribution and **Chain Replication** for metadata consistency.
 
+## Features
+*   **Scalability**: Uses **Consistent Hashing** (DHT) to distribute file chunks across storage nodes.
+*   **Consistency**: Uses **Chain Replication** (Head -> Mid -> Tail) for strong consistency in metadata.
+*   **Performance**: Implements **Thread Pools** in all server nodes to handle concurrent client requests efficiently.
+*   **Fault Tolerance**:
+    *   **Storage**: Chunks are replicated (k=2). If a node fails, data is retrieved from its replica.
+    *   **Metadata**: Client automatically fails over to the next node if the Head fails.
+*   **Integrity**: Automatic SHA-256 verification of downloaded files.
+
 ## Architecture
 
 ### Components
@@ -14,6 +23,7 @@ A distributed file storage system implementing **Consistent Hashing** for data d
 2.  **Storage Node**:
     *   Stores raw chunk data.
     *   Key-Value store interface (`STORE`, `GET`).
+    *   Uses `ExecutorService` (Thread Pool) for concurrency.
 3.  **Metadata Node**:
     *   Stores file metadata (filename -> chunks list).
     *   Implements **Chain Replication** (Head -> Mid -> Tail).
@@ -29,19 +39,46 @@ A distributed file storage system implementing **Consistent Hashing** for data d
 
 ```
 src/main/java/com/distributed/storage/
-├── client/         # Client application & verification
+├── client/         # Client application & System Tests
 ├── common/         # Shared utilities (Hashing, File I/O)
 ├── dht/            # Consistent Hashing implementation
 ├── metadata/       # Metadata Node (Chain Replication)
 ├── network/        # TCP Networking primitives
-└── storage/        # Storage Node implementation
+├── storage/        # Storage Node implementation
 ```
 
-## Build & Run
+## Build & Run (Linux/Mac)
 
-**Compile:**
+This project uses a **Makefile** for easy compilation and testing.
 
+### 1. Compile
 ```bash
+make
+```
+
+### 2. Run Experiments (Evaluation)
+To verify the system's functionality, fault tolerance, and performance, run the automated system tests:
+```bash
+make test
+```
+**What this does:**
+*   Starts a local cluster (2 Storage Nodes, 3 Metadata Nodes).
+*   **Experiment A (Fault Tolerance)**: Uploads a file, kills a Storage Node, and verifies the file can still be downloaded from the replica.
+*   **Experiment B (Concurrency)**: Spawns 10 concurrent clients to upload/download files simultaneously.
+
+### 3. Clean
+```bash
+make clean
+```
+
+## Manual Build & Run (No Makefile)
+
+If `make` is not available, or if you prefer running commands manually, follow these steps:
+
+### 1. Compile
+Run this command from the project root:
+```bash
+mkdir -p out
 javac -d out src/main/java/com/distributed/storage/common/*.java \
              src/main/java/com/distributed/storage/dht/*.java \
              src/main/java/com/distributed/storage/network/*.java \
@@ -50,29 +87,12 @@ javac -d out src/main/java/com/distributed/storage/common/*.java \
              src/main/java/com/distributed/storage/client/*.java
 ```
 
-**Run Full System Test:**
+### 2. Run Experiments (Evaluation)
+```bash
+java -cp out com.distributed.storage.client.SystemTests
+```
 
-This runs a self-contained test that spawns 3 Storage Nodes and 3 Metadata Nodes locally, uploads a file, and downloads it.
-
+### 3. Run Manual Client (Interactive)
 ```bash
 java -cp out com.distributed.storage.client.Client
-```
-
-## Manual Deployment
-
-**Start Storage Nodes:**
-```bash
-java -cp out com.distributed.storage.storage.StorageNode 8001
-java -cp out com.distributed.storage.storage.StorageNode 8002
-...
-```
-
-**Start Metadata Nodes (Chain: 9001 -> 9002 -> 9003):**
-```bash
-# Tail
-java -cp out com.distributed.storage.metadata.MetadataNode 9003
-# Mid
-java -cp out com.distributed.storage.metadata.MetadataNode 9002 127.0.0.1 9003
-# Head
-java -cp out com.distributed.storage.metadata.MetadataNode 9001 127.0.0.1 9002
 ```
