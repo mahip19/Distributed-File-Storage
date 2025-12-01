@@ -69,11 +69,22 @@ public class StorageNode {
     }
     
     public static void main(String[] args) {
-        if (args.length != 1) {
-            System.out.println("Usage: java StorageNode <port>");
+        if (args.length != 2) {
+            System.out.println("Usage: java StorageNode <config_file> <node_id>");
             return;
         }
-        int port = Integer.parseInt(args[0]);
-        new StorageNode().start(port);
+        
+        String configFile = args[0];
+        int nodeId = Integer.parseInt(args[1]);
+        
+        com.distributed.storage.common.NodeConfig config = new com.distributed.storage.common.NodeConfig(configFile, nodeId);
+        com.distributed.storage.common.NodeInfo myNode = config.getMyNode();
+        
+        if (myNode == null) {
+            System.err.println("Error: Node ID " + nodeId + " not found in config file.");
+            return;
+        }
+        
+        new StorageNode().start(myNode.getPort());
     }
 }

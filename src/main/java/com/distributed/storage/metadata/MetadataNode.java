@@ -279,20 +279,56 @@ public class MetadataNode {
     }
 
     public static void main(String[] args) {
-        if (args.length < 1) {
-            System.out.println("Usage: java MetadataNode <port> [nextIp nextPort]");
+        if (args.length != 2) {
+            System.out.println("Usage: java MetadataNode <config_file> <node_id>");
             return;
         }
         
-        int port = Integer.parseInt(args[0]);
+        String configFile = args[0];
+        int nodeId = Integer.parseInt(args[1]);
+        
+        com.distributed.storage.common.NodeConfig config = new com.distributed.storage.common.NodeConfig(configFile, nodeId);
+        com.distributed.storage.common.NodeInfo myNode = config.getMyNode();
+        
+        if (myNode == null) {
+            System.err.println("Error: Node ID " + nodeId + " not found in config file.");
+            return;
+        }
+
+        // Determine chain topology from config
+        // We assume metadata nodes are those with IDs >= 11 (based on our sample config convention)
+        // or we just look for the next node ID in the list that is also a metadata node.
+        // For simplicity, let's assume the config list is sorted or we sort it.
+        // And we assume the chain follows the order in the config.
+        
+        List<com.distributed.storage.common.NodeInfo> allNodes = config.getAllNodes();
+        // Filter for metadata nodes (heuristic: ports 9000+) or just use specific IDs
+        // For this implementation, let's assume IDs 11-20 are metadata nodes as per the sample config comment.
+        List<com.distributed.storage.common.NodeInfo> metadataNodes = new java.util.ArrayList<>();
+        for (com.distributed.storage.common.NodeInfo n : allNodes) {
+             if (n.getId() >= 11) {
+                 metadataNodes.add(n);
+             }
+        }
+        
+        // Sort by ID
+        metadataNodes.sort(java.util.Comparator.comparingInt(com.distributed.storage.common.NodeInfo::getId));
+        
         String nextIp = "";
         int nextPort = -1;
         
-        if (args.length >= 3) {
-            nextIp = args[1];
-            nextPort = Integer.parseInt(args[2]);
+        for (int i = 0; i < metadataNodes.size(); i++) {
+            if (metadataNodes.get(i).getId() == nodeId) {
+                // Found myself. Next node is i+1
+                if (i + 1 < metadataNodes.size()) {
+                    com.distributed.storage.common.NodeInfo next = metadataNodes.get(i + 1);
+                    nextIp = next.getHost();
+                    nextPort = next.getPort();
+                }
+                break;
+            }
         }
         
-        new MetadataNode(nextIp, nextPort).start(port);
+        new MetadataNode(nextIp, nextPort).start(myNode.getPort());
     }
 }

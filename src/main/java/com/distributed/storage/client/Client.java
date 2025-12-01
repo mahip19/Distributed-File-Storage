@@ -25,6 +25,9 @@ public class Client {
         this.metadataNodes = metadataNodes;
     }
 
+    public long lastMetadataUploadDuration;
+    public long lastChunkUploadDuration;
+
     public void uploadFile(String filepath) {
         System.out.println("Uploading " + filepath);
         List<Chunk> chunks = FileUtils.splitFileIntoChunks(filepath);
@@ -41,6 +44,7 @@ public class Client {
         System.out.println("Root Hash (CID): " + rootHash);
 
         // 1. Upload chunks with replication
+        long startChunkUpload = System.currentTimeMillis();
         int replicationFactor = 2; // k=2
         for (Chunk chunk : chunks) {
             List<String> nodes = dht.getNodesForKey(chunk.hash, replicationFactor);
@@ -60,8 +64,10 @@ public class Client {
                 return; // Abort
             }
         }
+        this.lastChunkUploadDuration = System.currentTimeMillis() - startChunkUpload;
         
         // 2. Upload Metadata (Try nodes in order: Head -> Mid -> Tail)
+        long startMetadataUpload = System.currentTimeMillis();
         boolean metadataSuccess = false;
         for (String nodeAddr : metadataNodes) {
             System.out.println("Trying to put metadata to " + nodeAddr);
@@ -73,6 +79,7 @@ public class Client {
                 System.err.println("Failed to connect/write to " + nodeAddr + ". Trying next...");
             }
         }
+        this.lastMetadataUploadDuration = System.currentTimeMillis() - startMetadataUpload;
         
         if (!metadataSuccess) {
             System.err.println("Failed to upload metadata to any node!");
@@ -284,34 +291,47 @@ public class Client {
 
     public static void main(String[] args) {
         // Full System Test with Head Failure Recovery
+        String configFile = "nodes.conf";
+        com.distributed.storage.common.NodeConfig config = new com.distributed.storage.common.NodeConfig(configFile);
+        List<com.distributed.storage.common.NodeInfo> allNodes = config.getAllNodes();
         
-        // 1. Start Storage Nodes
-        startStorageNode(8001);
-        startStorageNode(8002);
-        
-        // 2. Start Metadata Nodes (Chain: 9001 -> 9002 -> 9003)
-        // Tail (9003)
-        startMetadataNode(9003, "", -1);
-        try { Thread.sleep(500); } catch (Exception e) {}
-        
-        // Mid (9002) -> 9003
-        startMetadataNode(9002, "127.0.0.1", 9003);
-        try { Thread.sleep(500); } catch (Exception e) {}
-        
-        // Head (9001) -> 9002
-        startMetadataNode(9001, "127.0.0.1", 9002);
-        try { Thread.sleep(1000); } catch (Exception e) {}
-
-        // 3. Configure Client with Metadata Chain
         List<String> storageNodes = new ArrayList<>();
-        storageNodes.add("127.0.0.1:8001");
-        storageNodes.add("127.0.0.1:8002");
-        
         List<String> metadataNodes = new ArrayList<>();
-        metadataNodes.add("127.0.0.1:9001");
-        metadataNodes.add("127.0.0.1:9002");
-        metadataNodes.add("127.0.0.1:9003");
+        List<com.distributed.storage.common.NodeInfo> metaNodeInfos = new ArrayList<>();
+
+        // Separate nodes
+        for (com.distributed.storage.common.NodeInfo node : allNodes) {
+            if (node.getId() < 10) { // Assumption: IDs < 10 are storage
+                storageNodes.add(node.getAddress());
+                // Start Storage Node
+                startStorageNode(node.getPort());
+            } else {
+                metadataNodes.add(node.getAddress());
+                metaNodeInfos.add(node);
+            }
+        }
         
+        // Sort metadata nodes to ensure chain order
+        metaNodeInfos.sort(java.util.Comparator.comparingInt(com.distributed.storage.common.NodeInfo::getId));
+        
+        // Start Metadata Nodes (Chain)
+        // Iterate in reverse to start Tail first (good practice, though not strictly required if they retry connections)
+        for (int i = metaNodeInfos.size() - 1; i >= 0; i--) {
+            com.distributed.storage.common.NodeInfo current = metaNodeInfos.get(i);
+            String nextIp = "";
+            int nextPort = -1;
+            
+            // Find next node (i+1)
+            if (i + 1 < metaNodeInfos.size()) {
+                com.distributed.storage.common.NodeInfo next = metaNodeInfos.get(i + 1);
+                nextIp = next.getHost();
+                nextPort = next.getPort();
+            }
+            
+            startMetadataNode(current.getPort(), nextIp, nextPort);
+            try { Thread.sleep(500); } catch (Exception e) {}
+        }
+
         Client client = new Client(storageNodes, metadataNodes);
         
         // 4. Initial Write (Normal)
@@ -323,9 +343,10 @@ public class Client {
         System.out.println("\n--- Initial Upload ---");
         client.uploadFile(testFile);
         
-        // 5. Kill HEAD Node (9001)
-        System.out.println("\n--- KILLING HEAD NODE (9001) ---");
-        killNode(9001);
+        // 5. Kill HEAD Node (Dynamically found)
+        int headPort = metaNodeInfos.get(0).getPort();
+        System.out.println("\n--- KILLING HEAD NODE (" + headPort + ") ---");
+        killNode(headPort);
         try { Thread.sleep(2000); } catch (InterruptedException e) {}
         
         // 6. Write New Content (Should failover to 9002)
