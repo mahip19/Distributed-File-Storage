@@ -27,8 +27,11 @@ public class Client {
 
     public long lastMetadataUploadDuration;
     public long lastChunkUploadDuration;
+    public long lastTotalUploadDuration;
+    public long lastTotalDownloadDuration;
 
     public void uploadFile(String filepath) {
+        long startTotal = System.currentTimeMillis();
         System.out.println("Uploading " + filepath);
         List<Chunk> chunks = FileUtils.splitFileIntoChunks(filepath);
         if (chunks.isEmpty()) {
@@ -86,6 +89,7 @@ public class Client {
         } else {
             System.out.println("Upload complete.");
         }
+        this.lastTotalUploadDuration = System.currentTimeMillis() - startTotal;
     }
 
     private boolean putMetadataToNode(String nodeAddr, String filepath, List<Chunk> chunks, String rootHash) {
@@ -125,6 +129,7 @@ public class Client {
     }
     
     public void downloadFile(String filename, String outputPath) {
+        long startTotal = System.currentTimeMillis();
         System.out.println("Downloading " + filename);
         
         // 1. Get Metadata from TAIL (Try reverse order for reads? Or just Tail?)
@@ -195,6 +200,7 @@ public class Client {
         } else {
             System.err.println("Reconstruction failed.");
         }
+        this.lastTotalDownloadDuration = System.currentTimeMillis() - startTotal;
     }
     
     private FileMetadata getMetadataFromNode(String nodeAddr, String filename) {
