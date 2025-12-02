@@ -29,8 +29,6 @@ public class Client {
     public long lastChunkUploadDuration;
     public long lastTotalUploadDuration;
     public long lastTotalDownloadDuration;
-    public long lastTotalUploadDuration;
-    public long lastTotalDownloadDuration;
 
     public void uploadFile(String filepath) {
         long startTime = System.currentTimeMillis();
