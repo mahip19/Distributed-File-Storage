@@ -1,0 +1,239 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{float}
+
+% Formatting setup
+\renewcommand{\baselinestretch}{1.1}
+
+\title{\textbf{Final Project Report: Distributed File Storage System}}
+\author{Samyak Shah \and Mahip Parekh}
+\date{CS 6650: Building Scalable Distributed Systems \\ December 2025}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+\vspace{-1em}
+\hrule
+\vspace{1em}
+
+\section{1. Detailed Description of the Project}
+This project implements a distributed file storage system designed to handle file uploads and downloads across a cluster of nodes. The system splits files into fixed-size chunks (1MB) and distributes them across multiple storage nodes to ensure scalability and fault tolerance.
+
+The core architectural components are:
+\begin{itemize}
+    \item \textbf{Client}: Handles file chunking, hashing (SHA-256), and orchestration of uploads/downloads.
+    \item \textbf{Storage Nodes}: Responsible for storing the actual file chunks. They act as a key-value store.
+    \item \textbf{Metadata Nodes}: Manage the mapping between filenames and their constituent chunks.
+    \item \textbf{Consistent Hashing (DHT)}: Used to determine which storage node is responsible for a given chunk, minimizing data movement during node additions/removals.
+    \item \textbf{Chain Replication}: Implemented for the metadata layer to ensure strong consistency. Writes propagate from $Head \rightarrow Mid \rightarrow Tail$, while reads are served by the Tail.
+\end{itemize}
+
+\section{2. Project Goal}
+The primary goal of this project was to build a scalable, fault-tolerant distributed system that demonstrates core distributed computing concepts. Specifically, we aimed to:
+\begin{enumerate}
+    \item Implement \textbf{Consistent Hashing} to evenly distribute load across storage nodes.
+    \item Implement \textbf{Chain Replication} to guarantee linearizable consistency for metadata.
+    \item Ensure \textbf{Fault Tolerance} so that data remains accessible even if a storage node fails (via replication factor $k=2$).
+    \item Achieve high \textbf{Performance} using multi-threading (Thread Pools) to handle concurrent client requests.
+\end{enumerate}
+
+\section{3. Software Design and Implementation}
+
+\subsection{3.1 Architecture}
+The system is divided into three distinct layers:
+
+\begin{itemize}
+    \item \textbf{Client Layer}:
+    \begin{itemize}
+        \item \textbf{Function}: Entry point for users. Splits files into 1MB chunks and computes a SHA-256 Content ID (CID) for each.
+        \item \textbf{Logic}: Uses the DHT to find the primary storage node for each chunk and its replicas. Uploads metadata to the Head of the metadata chain.
+    \end{itemize}
+
+    \item \textbf{Metadata Layer (Chain Replication)}:
+    \begin{itemize}
+        \item \textbf{Topology}: A chain of 3 nodes: $Head \rightarrow Mid \rightarrow Tail$.
+        \item \textbf{Consistency}: Strong consistency. A write is only acknowledged after it has propagated to the Tail.
+        \item \textbf{Read Path}: Clients read only from the Tail to ensure they see the latest committed state.
+    </itemize}
+
+    \item \textbf{Storage Layer (DHT Ring)}:
+    \begin{itemize}
+        \item \textbf{Partitioning}: Nodes are arranged on a consistent hash ring.
+        \item \textbf{Replication}: Each chunk is stored on its primary node and the next $k-1$ nodes in the ring (Successor List).
+    \end{itemize}
+\end{itemize}
+
+\subsection{3.2 Key Implementation Details}
+\begin{itemize}
+    \item \textbf{Language}: Java 17+
+    \item \textbf{Communication}: TCP Sockets with \texttt{DataOutputStream}/\texttt{DataInputStream} for custom length-prefixed messaging.
+    \item \textbf{Concurrency}: \texttt{ExecutorService} (CachedThreadPool) used in all server nodes to handle multiple concurrent connections.
+    \item \textbf{Storage}: In-memory \texttt{ConcurrentHashMap} used to simulate storage nodes (as per project constraints to demonstrate volatile storage handling).
+\end{itemize}
+
+\section{4. Achievements and Non-Achievements}
+
+\subsection{Achieved}
+\begin{itemize}
+    \item \textbf{Core Functionality}: Successful upload and download of files of varying sizes.
+    \item \textbf{Fault Tolerance}: System survives the failure of a storage node. Data is seamlessly retrieved from replicas.
+    \item \textbf{Consistency}: Metadata updates are linearizable due to Chain Replication.
+    \item \textbf{Performance}: System handles multiple concurrent clients (tested up to 50) with reasonable latency.
+    \item \textbf{Automated Testing}: Comprehensive system tests (\texttt{SystemTests.java}) verify correctness and performance.
+\end{itemize}
+
+\subsection{Not Achieved / Future Work}
+\begin{itemize}
+    \item \textbf{Dynamic Node Recovery}: While the system handles node failure, automatically re-joining a failed node and backfilling data (hinted handoff) is partially implemented but not fully automated.
+    \item \textbf{Persistent Storage}: Currently uses in-memory storage. Integrating RocksDB or LevelDB would provide persistence across process restarts.
+\end{itemize}
+
+\section{5. Evaluation of the System}
+We evaluated the system using two primary metrics: \textbf{Scalability} and \textbf{Throughput}.
+
+\subsection{5.1 Scalability (Latency vs. Concurrent Clients)}
+We measured the average upload and download latency as the number of concurrent clients increased from 1 to 50.
+\begin{itemize}
+    \item \textbf{Observation}: Latency remains low ($< 50$ms) for up to 10 clients. As load increases to 50 clients, latency increases linearly.
+    \item \textbf{Analysis}: This linear increase is expected. Each client connection consumes a thread from the cached thread pool. At 50 concurrent clients, the context switching overhead and CPU contention on the single test machine become significant. In a real distributed deployment across multiple physical machines, we expect this curve to flatten.
+\end{itemize}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{graph_scalability.png}
+    \caption{Scalability: Latency vs Number of Clients}
+\end{figure}
+
+\subsection{5.2 Throughput (Latency vs. File Size)}
+We measured latency for files ranging from 10KB to 10MB.
+\begin{itemize}
+    \item \textbf{Observation}: The system shows efficient handling of larger files. The overhead per chunk is minimal.
+    \item \textbf{Analysis}: For small files (10KB - 100KB), the latency is dominated by the fixed overhead of the TCP handshake, Chain Replication metadata updates, and DHT lookups. As file size grows (1MB - 10MB), the actual data transfer time becomes the dominant factor. The system effectively saturates the available network bandwidth.
+\end{itemize}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{graph_throughput.png}
+    \caption{Throughput: Latency vs File Size}
+\end{figure}
+
+\section{6. Achievements and Changes from Plan}
+\begin{itemize}
+    \item \textbf{Pivot to Chain Replication}: As noted in the project plan, we initially considered a blockchain-based approach but pivoted to Chain Replication to focus on strong consistency and availability, which better aligned with the course goals.
+    \item \textbf{Simplification of Consensus}: We chose Chain Replication over Raft/Paxos for the metadata layer due to its simplicity and high read throughput (reads served by Tail).
+\end{itemize}
+
+\section{7. What You Have Learned}
+This project gave us hands-on experience with the challenges of building distributed systems:
+
+\subsection{Debugging Distributed Systems}
+Unlike single-threaded programs, distributed systems behave non-deterministically. We encountered race conditions in chain replication where acknowledgments returned before the Tail committed. Extensive logging was essential for tracing issues.
+
+\subsection{Consistent Hashing}
+Implementing the DHT taught us why consistent hashing minimizes data movement during node changes; only a fraction of keys need redistribution compared to traditional hashing.
+
+\subsection{Chain Replication Trade-offs}
+We understood practically why chain replication offers high read throughput (reads from Tail) at the cost of increased write latency (propagation through the chain).
+
+\subsection{Fault Tolerance Complexity}
+Handling partial failures (e.g., a node failing mid-write) required careful design. Content-addressed storage with CIDs made operations idempotent, allowing safe retries.
+
+\subsection{Value of Modularity}
+Clean separation between layers meant that pivoting from blockchain to chain replication required no changes to the storage layer.
+
+\subsection{Adaptability}
+Most importantly, we learned that plans change. Our original blockchain design was too complex for the timeline. Recognizing this early and pivoting was a valuable lesson; adaptability is as important as technical skill.
+
+\section{8. Setup, Run, and Test Instructions}
+
+\subsection{Prerequisites}
+\begin{itemize}
+    \item Java 17 or higher
+    \item Make (optional, for easier build)
+    \item Python 3 (for generating graphs)
+\end{itemize}
+
+\subsection{Building the Project}
+\begin{verbatim}
+make
+# OR manually:
+mkdir -p out
+javac -d out src/main/java/com/distributed/storage/**/*.java
+\end{verbatim}
+
+\subsection{Running System Tests (Local Evaluation)}
+This runs the automated fault tolerance and concurrency tests:
+\begin{verbatim}
+make test
+# OR
+java -cp out com.distributed.storage.client.SystemTests
+\end{verbatim}
+
+\subsection{Generating Performance Report}
+\begin{verbatim}
+python plot_results.py
+\end{verbatim}
+
+\section{9. Instructions for Khoury Linux Cluster}
+To run this on the Khoury Linux cluster (e.g., \texttt{linux-079.khoury.northeastern.edu}), follow these detailed steps. These instructions assume you are using a terminal on your local machine.
+
+\begin{enumerate}
+    \item \textbf{Transfer Code}:
+    Use \texttt{scp} to copy the project directory to your home folder on the cluster. Replace \texttt{<your\_username>} with your Khoury username.
+    \begin{verbatim}
+scp -r Distributed-File-Storage/ <your_username>@linux-079.khoury.northeastern.edu:~/
+    \end{verbatim}
+
+    \item \textbf{SSH into the machine}:
+    Log in to the remote machine.
+    \begin{verbatim}
+ssh <your_username>@linux-079.khoury.northeastern.edu
+    \end{verbatim}
+
+    \item \textbf{Verify Java Version}:
+    Ensure you are running Java 17 or higher.
+    \begin{verbatim}
+java -version
+    \end{verbatim}
+    If the version is lower than 17, you may need to load a module (if available) or set your \texttt{JAVA\_HOME}.
+
+    \item \textbf{Navigate to Project Directory}:
+    \begin{verbatim}
+cd Distributed-File-Storage
+    \end{verbatim}
+
+    \item \textbf{Compile the Project}:
+    We use a Makefile to simplify compilation. Run:
+    \begin{verbatim}
+make
+    \end{verbatim}
+    This will compile all source files and place the class files in the \texttt{out/} directory.
+
+    \item \textbf{Run Evaluation (System Tests)}:
+    The \texttt{SystemTests} class runs a self-contained evaluation that spawns Storage and Metadata nodes locally (on different ports) and runs the client experiments.
+    \begin{verbatim}
+make test
+    \end{verbatim}
+    \textbf{Expected Output:} You should see logs indicating nodes starting, files being uploaded/downloaded, and a final "ALL TESTS PASSED" message.
+
+    \item \textbf{(Optional) Manual Execution on Multiple Machines}:
+    If you wish to run nodes on \textit{separate} physical machines (e.g., linux-079, linux-080):
+    \begin{itemize}
+        \item Edit \texttt{nodes.conf} to replace \texttt{localhost} with the actual IP addresses (use \texttt{hostname -I} to find them).
+        \item SSH into each machine and start the components manually:
+        \begin{verbatim}
+# On Machine 1 (Storage Node 1)
+java -cp out com.distributed.storage.storage.StorageNode 8081
+
+# On Machine 2 (Metadata Node 1)
+java -cp out com.distributed.storage.metadata.MetadataNode 9091
+        \end{verbatim}
+    \end{itemize}
+\end{enumerate}
+
+\section{10. Individual Contributions}
+Both Samyak Shah and Mahip Parekh contributed equally (50-50) to the design, implementation, testing, and documentation of this project. We pair-programmed for the majority of the core features including the DHT logic, Chain Replication, and the Client-Server communication protocol.
+
+\end{document}

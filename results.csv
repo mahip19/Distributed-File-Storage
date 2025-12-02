@@ -1,0 +1,10 @@
+Experiment,Variable,Value,AvgUploadLatency,AvgDownloadLatency,SuccessRate
+Scalability,Clients,1,38.00,18.00,100.00
+Scalability,Clients,5,14.60,27.80,100.00
+Scalability,Clients,10,7.60,22.10,100.00
+Scalability,Clients,20,50.15,53.80,100.00
+Scalability,Clients,50,112.84,55.56,100.00
+Throughput,FileSize,10240,6.00,12.00,100.00
+Throughput,FileSize,102400,7.00,12.00,100.00
+Throughput,FileSize,1048576,6.00,14.00,100.00
+Throughput,FileSize,10485760,55.00,58.00,100.00
