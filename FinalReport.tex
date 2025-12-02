@@ -58,7 +58,7 @@ The system is divided into three distinct layers:
         \item \textbf{Topology}: A chain of 3 nodes: $Head \rightarrow Mid \rightarrow Tail$.
         \item \textbf{Consistency}: Strong consistency. A write is only acknowledged after it has propagated to the Tail.
         \item \textbf{Read Path}: Clients read only from the Tail to ensure they see the latest committed state.
-    </itemize}
+    \end{itemize}
 
     \item \textbf{Storage Layer (DHT Ring)}:
     \begin{itemize}
@@ -72,7 +72,7 @@ The system is divided into three distinct layers:
     \item \textbf{Language}: Java 17+
     \item \textbf{Communication}: TCP Sockets with \texttt{DataOutputStream}/\texttt{DataInputStream} for custom length-prefixed messaging.
     \item \textbf{Concurrency}: \texttt{ExecutorService} (CachedThreadPool) used in all server nodes to handle multiple concurrent connections.
-    \item \textbf{Storage}: In-memory \texttt{ConcurrentHashMap} used to simulate storage nodes (as per project constraints to demonstrate volatile storage handling).
+    \item \textbf{Storage}: In-memory \texttt{ConcurrentHashMap} used to simulate storage nodes.
 \end{itemize}
 
 \section{4. Achievements and Non-Achievements}
@@ -86,10 +86,14 @@ The system is divided into three distinct layers:
     \item \textbf{Automated Testing}: Comprehensive system tests (\texttt{SystemTests.java}) verify correctness and performance.
 \end{itemize}
 
-\subsection{Not Achieved / Future Work}
+\subsection{Future Work}
 \begin{itemize}
-    \item \textbf{Dynamic Node Recovery}: While the system handles node failure, automatically re-joining a failed node and backfilling data (hinted handoff) is partially implemented but not fully automated.
     \item \textbf{Persistent Storage}: Currently uses in-memory storage. Integrating RocksDB or LevelDB would provide persistence across process restarts.
+\end{itemize}
+
+\subsection{What's left/not working}
+\begin{itemize}
+    \item \textbf{Client Configuration}: The client currently uses hardcoded IP addresses and ports for storage and metadata nodes.
 \end{itemize}
 
 \section{5. Evaluation of the System}
@@ -125,7 +129,7 @@ We measured latency for files ranging from 10KB to 10MB.
     \item \textbf{Simplification of Consensus}: We chose Chain Replication over Raft/Paxos for the metadata layer due to its simplicity and high read throughput (reads served by Tail).
 \end{itemize}
 
-\section{7. What You Have Learned}
+\section*{7. What You Have Learned}
 This project gave us hands-on experience with the challenges of building distributed systems:
 
 \subsection{Debugging Distributed Systems}
@@ -172,9 +176,16 @@ java -cp out com.distributed.storage.client.SystemTests
 \end{verbatim}
 
 \subsection{Generating Performance Report}
+
 \begin{verbatim}
 python plot_results.py
 \end{verbatim}
+{Note: The Khoury Linux Server does not have pandas library, which is necessary to run the script. However, this is not a core requirement of the project. You can run the following command below to install pandas library.}
+
+\begin{verbatim}
+    pip install pandas
+\end{verbatim}
+
 
 \section{9. Instructions for Khoury Linux Cluster}
 To run this on the Khoury Linux cluster (e.g., \texttt{linux-079.khoury.northeastern.edu}), follow these detailed steps. These instructions assume you are using a terminal on your local machine.
@@ -218,22 +229,10 @@ make test
     \end{verbatim}
     \textbf{Expected Output:} You should see logs indicating nodes starting, files being uploaded/downloaded, and a final "ALL TESTS PASSED" message.
 
-    \item \textbf{(Optional) Manual Execution on Multiple Machines}:
-    If you wish to run nodes on \textit{separate} physical machines (e.g., linux-079, linux-080):
-    \begin{itemize}
-        \item Edit \texttt{nodes.conf} to replace \texttt{localhost} with the actual IP addresses (use \texttt{hostname -I} to find them).
-        \item SSH into each machine and start the components manually:
-        \begin{verbatim}
-# On Machine 1 (Storage Node 1)
-java -cp out com.distributed.storage.storage.StorageNode 8081
-
-# On Machine 2 (Metadata Node 1)
-java -cp out com.distributed.storage.metadata.MetadataNode 9091
-        \end{verbatim}
-    \end{itemize}
 \end{enumerate}
 
-\section{10. Individual Contributions}
+
+\section{11. Individual Contributions}
 Both Samyak Shah and Mahip Parekh contributed equally (50-50) to the design, implementation, testing, and documentation of this project. We pair-programmed for the majority of the core features including the DHT logic, Chain Replication, and the Client-Server communication protocol.
 
 \end{document}
