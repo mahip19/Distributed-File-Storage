@@ -61,6 +61,11 @@ public class StorageNode {
                 } else {
                     server.sendMessage(clientId, "NOT_FOUND");
                 }
+            } else if ("DIE".equals(op)) {
+                System.out.println("Received DIE command. Stopping...");
+                running = false;
+                server.stop();
+                break;
             } else {
                 server.sendMessage(clientId, "ERROR");
             }

@@ -290,112 +290,39 @@ public class Client {
     }
 
     public static void main(String[] args) {
-        // Full System Test with Head Failure Recovery
-        String configFile = "nodes.conf";
-        com.distributed.storage.common.NodeConfig config = new com.distributed.storage.common.NodeConfig(configFile);
-        List<com.distributed.storage.common.NodeInfo> allNodes = config.getAllNodes();
-        
+        if (args.length < 2) {
+            System.out.println("Usage:");
+            System.out.println("  java com.distributed.storage.client.Client upload <filepath>");
+            System.out.println("  java com.distributed.storage.client.Client download <filename> <output_path>");
+            return;
+        }
+
+        // Default Configuration (matching the manual instructions)
         List<String> storageNodes = new ArrayList<>();
+        storageNodes.add("127.0.0.1:8001");
+        storageNodes.add("127.0.0.1:8002");
+        
         List<String> metadataNodes = new ArrayList<>();
-        List<com.distributed.storage.common.NodeInfo> metaNodeInfos = new ArrayList<>();
-
-        // Separate nodes
-        for (com.distributed.storage.common.NodeInfo node : allNodes) {
-            if (node.getId() < 10) { // Assumption: IDs < 10 are storage
-                storageNodes.add(node.getAddress());
-                // Start Storage Node
-                startStorageNode(node.getPort());
-            } else {
-                metadataNodes.add(node.getAddress());
-                metaNodeInfos.add(node);
-            }
-        }
+        metadataNodes.add("127.0.0.1:9001");
+        metadataNodes.add("127.0.0.1:9002");
+        metadataNodes.add("127.0.0.1:9003");
         
-        // Sort metadata nodes to ensure chain order
-        metaNodeInfos.sort(java.util.Comparator.comparingInt(com.distributed.storage.common.NodeInfo::getId));
-        
-        // Start Metadata Nodes (Chain)
-        // Iterate in reverse to start Tail first (good practice, though not strictly required if they retry connections)
-        for (int i = metaNodeInfos.size() - 1; i >= 0; i--) {
-            com.distributed.storage.common.NodeInfo current = metaNodeInfos.get(i);
-            String nextIp = "";
-            int nextPort = -1;
-            
-            // Find next node (i+1)
-            if (i + 1 < metaNodeInfos.size()) {
-                com.distributed.storage.common.NodeInfo next = metaNodeInfos.get(i + 1);
-                nextIp = next.getHost();
-                nextPort = next.getPort();
-            }
-            
-            startMetadataNode(current.getPort(), nextIp, nextPort);
-            try { Thread.sleep(500); } catch (Exception e) {}
-        }
-
         Client client = new Client(storageNodes, metadataNodes);
         
-        // 4. Initial Write (Normal)
-        String testFile = "test_upload.txt";
-        try {
-            Files.writeString(Path.of(testFile), "Initial content.");
-        } catch (IOException e) { e.printStackTrace(); }
-
-        System.out.println("\n--- Initial Upload ---");
-        client.uploadFile(testFile);
+        String command = args[0];
+        String filename = args[1];
         
-        // 5. Kill HEAD Node (Dynamically found)
-        int headPort = metaNodeInfos.get(0).getPort();
-        System.out.println("\n--- KILLING HEAD NODE (" + headPort + ") ---");
-        killNode(headPort);
-        try { Thread.sleep(2000); } catch (InterruptedException e) {}
-        
-        // 6. Write New Content (Should failover to 9002)
-        System.out.println("\n--- Uploading Post-Head-Failure Content ---");
-        String testFile2 = "test_upload_head_fail.txt";
-        try {
-            Files.writeString(Path.of(testFile2), "Content written after Head Node failure.");
-        } catch (IOException e) { e.printStackTrace(); }
-        
-        client.uploadFile(testFile2);
-        
-        // 7. Verify Read (Should find metadata on 9003 or 9002 depending on replication)
-        // Note: Since 9001 is dead, the write to 9002 should propagate to 9003.
-        System.out.println("\n--- Verifying Read ---");
-        String outFile2 = "test_downloaded_head_fail.txt";
-        client.downloadFile(testFile2, outFile2);
-        
-        System.exit(0);
-    }
-    
-    private static void configureSkipNode(int targetPort, String skipIp, int skipPort) {
-        TCPClient client = new TCPClient();
-        if (client.connect("127.0.0.1", targetPort)) {
-            client.sendMessage("SET_SKIP " + skipIp + " " + skipPort);
-            client.recvMessage(); // ACK
-            client.close();
-            System.out.println("Configured skip on " + targetPort + " -> " + skipPort);
+        if ("upload".equalsIgnoreCase(command)) {
+            client.uploadFile(filename);
+        } else if ("download".equalsIgnoreCase(command)) {
+            if (args.length < 3) {
+                System.out.println("Usage: download <filename> <output_path>");
+                return;
+            }
+            String outputPath = args[2];
+            client.downloadFile(filename, outputPath);
+        } else {
+            System.out.println("Unknown command: " + command);
         }
     }
-    
-    private static void killNode(int port) {
-         TCPClient client = new TCPClient();
-        if (client.connect("127.0.0.1", port)) {
-            client.sendMessage("DIE");
-            client.close();
-            System.out.println("Sent DIE to " + port);
-        }
-    }
-    
-    private static void startStorageNode(int port) {
-        new Thread(() -> {
-            new StorageNode().start(port);
-        }).start();
-    }
-    
-    private static void startMetadataNode(int port, String nextIp, int nextPort) {
-        new Thread(() -> {
-            new com.distributed.storage.metadata.MetadataNode(nextIp, nextPort).start(port);
-        }).start();
-    }
-}
 

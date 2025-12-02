@@ -22,6 +22,7 @@ public class SystemTests {
         try {
             testStorageFailure();
             testConcurrentClients();
+            testBinaryFiles();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -146,6 +147,59 @@ public class SystemTests {
             Files.deleteIfExists(Path.of("concurrent_" + i + ".txt"));
             Files.deleteIfExists(Path.of("concurrent_out_" + i + ".txt"));
         }
+    }
+
+    private static void testBinaryFiles() throws Exception {
+        System.out.println("\n[TEST] Binary Files (Image & PDF)");
+
+        // 1. Setup Cluster
+        startStorageNode(8001);
+        startStorageNode(8002);
+        startMetadataNode(9003, "", -1);
+        Thread.sleep(500);
+        startMetadataNode(9002, "127.0.0.1", 9003);
+        Thread.sleep(500);
+        startMetadataNode(9001, "127.0.0.1", 9002);
+        Thread.sleep(1000);
+
+        List<String> storageNodes = List.of("127.0.0.1:8001", "127.0.0.1:8002");
+        List<String> metadataNodes = List.of("127.0.0.1:9001", "127.0.0.1:9002", "127.0.0.1:9003");
+        Client client = new Client(storageNodes, metadataNodes);
+
+        String[] files = {"test_image.jpg", "test_pdf.pdf"};
+        
+        for (String filename : files) {
+            if (!Files.exists(Path.of(filename))) {
+                System.out.println("Skipping " + filename + " (File not found)");
+                continue;
+            }
+            
+            System.out.println(">>> Testing " + filename);
+            client.uploadFile(filename);
+            
+            String outFilename = "restored_" + filename;
+            client.downloadFile(filename, outFilename);
+            
+            String originalCID = VerifyFiles.computeCID(filename);
+            String downloadedCID = VerifyFiles.computeCID(outFilename);
+            
+            if (originalCID.equals(downloadedCID)) {
+                System.out.println("[PASS] " + filename + ": Integrity Verified (" + originalCID + ")");
+            } else {
+                System.err.println("[FAIL] " + filename + ": Integrity Mismatch!");
+            }
+            
+            // Cleanup output
+            Files.deleteIfExists(Path.of(outFilename));
+        }
+
+        // Teardown
+        killNode(8001);
+        killNode(8002);
+        killNode(9001);
+        killNode(9002);
+        killNode(9003);
+        Thread.sleep(2000);
     }
 
     // --- Helpers ---
