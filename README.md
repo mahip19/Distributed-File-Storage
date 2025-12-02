@@ -1,39 +1,50 @@
-# Distributed File Storage (Java)
+# Distributed File Storage System
 
-A distributed file storage system implementing **Consistent Hashing** for data distribution and **Chain Replication** for metadata consistency.
+A scalable, fault-tolerant distributed file storage system implemented in Java. This project demonstrates core distributed computing concepts such as **Consistent Hashing** for data distribution and **Chain Replication** for strong metadata consistency.
 
-## Features
-*   **Scalability**: Uses **Consistent Hashing** (DHT) to distribute file chunks across storage nodes.
-*   **Consistency**: Uses **Chain Replication** (Head -> Mid -> Tail) for strong consistency in metadata.
-*   **Performance**: Implements **Thread Pools** in all server nodes to handle concurrent client requests efficiently.
-*   **Fault Tolerance**:
-    *   **Storage**: Chunks are replicated (k=2). If a node fails, data is retrieved from its replica.
-    *   **Metadata**: Client automatically fails over to the next node if the Head fails.
-*   **Integrity**: Automatic SHA-256 verification of downloaded files.
+## Project Goals
+
+The primary goal of this project was to build a distributed system that ensures:
+*   **Scalability**: Evenly distribute load across storage nodes using Consistent Hashing.
+*   **Consistency**: Guarantee linearizable consistency for metadata using Chain Replication.
+*   **Fault Tolerance**: Ensure data remains accessible even if a storage node fails (Replication Factor = 2).
+*   **Performance**: Handle concurrent client requests efficiently using multi-threading.
 
 ## Architecture
 
-### Components
+The system is organized into three distinct layers:
 
-1.  **Client**: 
-    *   Splits files into 1MB chunks.
-    *   Computes SHA-256 Content IDs (CIDs).
-    *   Uploads chunks to **Storage Nodes** (Replication Factor = 2).
-    *   Uploads metadata to **Metadata Ring** (Head).
-2.  **Storage Node**:
-    *   Stores raw chunk data.
-    *   Key-Value store interface (`STORE`, `GET`).
-    *   Uses `ExecutorService` (Thread Pool) for concurrency.
-3.  **Metadata Node**:
-    *   Stores file metadata (filename -> chunks list).
-    *   Implements **Chain Replication** (Head -> Mid -> Tail).
-    *   **Writes**: Sent to Head, propagated to Tail.
-    *   **Reads**: Served by Tail (Strong Consistency).
+### 1. Client Layer
+*   **Function**: Acts as the entry point for users.
+*   **Logic**: Splits files into 1MB chunks, computes SHA-256 Content IDs (CIDs), and orchestrates uploads/downloads. It uses the DHT to locate primary storage nodes and communicates with the Head of the metadata chain for updates.
 
-### Data Flow
+### 2. Metadata Layer (Chain Replication)
+*   **Topology**: A chain of 3 nodes: `Head -> Mid -> Tail`.
+*   **Consistency**: Implements strong consistency. Writes are propagated down the chain and only acknowledged after reaching the Tail.
+*   **Read Path**: Reads are served exclusively by the Tail to ensure the latest committed state is observed.
 
-*   **Upload**: Client -> Chunk Hashing -> DHT Lookup -> Upload to Storage Nodes -> Upload Metadata to Head.
-*   **Download**: Client -> Get Metadata from Tail -> DHT Lookup -> Download Chunks from Storage Nodes -> Reconstruct.
+### 3. Storage Layer (DHT Ring)
+*   **Partitioning**: Nodes are arranged on a consistent hash ring.
+*   **Replication**: Each chunk is stored on its primary node and replicated to the next `k-1` nodes (Successor List) for fault tolerance.
+
+## Key Features
+
+*   **Consistent Hashing (DHT)**: Minimizes data movement during node additions/removals.
+*   **Chain Replication**: Ensures strong consistency for file metadata.
+*   **Fault Tolerance**:
+    *   **Storage**: Automatic failover to replicas if a storage node goes down.
+    *   **Metadata**: Client handles failover if the Head node becomes unresponsive.
+*   **Concurrency**: Server nodes use `ExecutorService` (CachedThreadPool) to handle multiple concurrent connections.
+*   **Integrity**: Verifies file integrity using SHA-256 hashing upon download.
+
+## Performance Evaluation
+
+The system was evaluated for **Scalability** and **Throughput**:
+
+*   **Scalability**: Latency remains low (< 50ms) for up to 10 concurrent clients. As expected, latency increases linearly with more clients due to resource contention on a single test machine.
+*   **Throughput**: The system efficiently handles larger files (1MB - 10MB), saturating available network bandwidth as the fixed overhead of metadata updates becomes negligible compared to data transfer time.
+
+> See `graph_scalability.png` and `graph_throughput.png` for detailed performance visualizations.
 
 ## Project Structure
 
@@ -47,52 +58,75 @@ src/main/java/com/distributed/storage/
 ├── storage/        # Storage Node implementation
 ```
 
-## Build & Run (Linux/Mac)
+## Setup & Usage
 
-This project uses a **Makefile** for easy compilation and testing.
+### Prerequisites
+*   Java 17 or higher
+*   Make (optional, for easier build)
+*   Python 3 (for generating performance graphs)
 
-### 1. Compile
+### Building the Project
+Using Make:
 ```bash
 make
 ```
 
-### 2. Run Experiments (Evaluation)
-To verify the system's functionality, fault tolerance, and performance, run the automated system tests:
-```bash
-make test
-```
-**What this does:**
-*   Starts a local cluster (2 Storage Nodes, 3 Metadata Nodes).
-*   **Experiment A (Fault Tolerance)**: Uploads a file, kills a Storage Node, and verifies the file can still be downloaded from the replica.
-*   **Experiment B (Concurrency)**: Spawns 10 concurrent clients to upload/download files simultaneously.
-
-### 3. Clean
-```bash
-make clean
-```
-
-## Manual Build & Run (No Makefile)
-
-If `make` is not available, or if you prefer running commands manually, follow these steps:
-
-### 1. Compile
-Run this command from the project root:
+Or manually:
 ```bash
 mkdir -p out
-javac -d out src/main/java/com/distributed/storage/common/*.java \
-             src/main/java/com/distributed/storage/dht/*.java \
-             src/main/java/com/distributed/storage/network/*.java \
-             src/main/java/com/distributed/storage/storage/*.java \
-             src/main/java/com/distributed/storage/metadata/*.java \
-             src/main/java/com/distributed/storage/client/*.java
+javac -d out src/main/java/com/distributed/storage/**/*.java
 ```
 
-### 2. Run Experiments (Evaluation)
+### Running System Tests
+To run the automated fault tolerance and concurrency tests:
 ```bash
+make test
+# OR
 java -cp out com.distributed.storage.client.SystemTests
 ```
 
-### 3. Run Manual Client (Interactive)
+### Generating Performance Report
+To generate the performance graphs (`graph_scalability.png`, `graph_throughput.png`):
 ```bash
-java -cp out com.distributed.storage.client.Client
+python plot_results.py
 ```
+*Note: Requires `pandas` (`pip install pandas`).*
+
+## Running on Khoury Linux Cluster
+
+To deploy and run on the Khoury Linux cluster (e.g., `linux-079.khoury.northeastern.edu`):
+
+1.  **Transfer Code**:
+    ```bash
+    scp -r Distributed-File-Storage-Java/ <your_username>@linux-079.khoury.northeastern.edu:~/
+    ```
+
+2.  **SSH & Compile**:
+    ```bash
+    ssh <your_username>@linux-079.khoury.northeastern.edu
+    cd Distributed-File-Storage-Java
+    make
+    ```
+
+3.  **Run Evaluation**:
+    ```bash
+    make test
+    ```
+
+4.  **Run Performance Experiments**:
+    ```bash
+    java -cp out com.distributed.storage.client.PerformanceExperiments
+    ```
+
+## Future Work
+
+*   **Persistent Storage**: Integrate RocksDB or LevelDB to replace the current in-memory storage, allowing data to survive process restarts.
+*   **Dynamic Configuration**: Improve client configuration to avoid hardcoded IP addresses and ports.
+
+## Contributors
+
+*   **Samyak Shah**
+*   **Mahip Parekh**
+
+---
+*CS 6650: Building Scalable Distributed Systems | December 2025*
