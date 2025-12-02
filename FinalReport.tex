@@ -96,10 +96,10 @@ The system is divided into three distinct layers:
     \item \textbf{Client Configuration}: The client currently uses hardcoded IP addresses and ports for storage and metadata nodes.
 \end{itemize}
 
-\section{5. Evaluation of the System}
+\section{Evaluation of the System}
 We evaluated the system using two primary metrics: \textbf{Scalability} and \textbf{Throughput}.
 
-\subsection{5.1 Scalability (Latency vs. Concurrent Clients)}
+\subsection{Scalability (Latency vs. Concurrent Clients)}
 We measured the average upload and download latency as the number of concurrent clients increased from 1 to 50.
 \begin{itemize}
     \item \textbf{Observation}: Latency remains low ($< 50$ms) for up to 10 clients. As load increases to 50 clients, latency increases linearly.
@@ -111,7 +111,7 @@ We measured the average upload and download latency as the number of concurrent 
     \caption{Scalability: Latency vs Number of Clients}
 \end{figure}
 
-\subsection{5.2 Throughput (Latency vs. File Size)}
+\subsection{Throughput (Latency vs. File Size)}
 We measured latency for files ranging from 10KB to 10MB.
 \begin{itemize}
     \item \textbf{Observation}: The system shows efficient handling of larger files. The overhead per chunk is minimal.
@@ -123,13 +123,13 @@ We measured latency for files ranging from 10KB to 10MB.
     \caption{Throughput: Latency vs File Size}
 \end{figure}
 
-\section{6. Achievements and Changes from Plan}
+\section{Achievements and Changes from Plan}
 \begin{itemize}
     \item \textbf{Pivot to Chain Replication}: As noted in the project plan, we initially considered a blockchain-based approach but pivoted to Chain Replication to focus on strong consistency and availability, which better aligned with the course goals.
     \item \textbf{Simplification of Consensus}: We chose Chain Replication over Raft/Paxos for the metadata layer due to its simplicity and high read throughput (reads served by Tail).
 \end{itemize}
 
-\section*{7. What You Have Learned}
+\section{What You Have Learned}
 This project gave us hands-on experience with the challenges of building distributed systems:
 
 \subsection{Debugging Distributed Systems}
@@ -150,7 +150,7 @@ Clean separation between layers meant that pivoting from blockchain to chain rep
 \subsection{Adaptability}
 Most importantly, we learned that plans change. Our original blockchain design was too complex for the timeline. Recognizing this early and pivoting was a valuable lesson; adaptability is as important as technical skill.
 
-\section{8. Setup, Run, and Test Instructions}
+\section{Setup, Run, and Test Instructions}
 
 \subsection{Prerequisites}
 \begin{itemize}
@@ -187,7 +187,7 @@ python plot_results.py
 \end{verbatim}
 
 
-\section{9. Instructions for Khoury Linux Cluster}
+\section{Instructions for Khoury Linux Cluster}
 To run this on the Khoury Linux cluster (e.g., \texttt{linux-079.khoury.northeastern.edu}), follow these detailed steps. These instructions assume you are using a terminal on your local machine.
 
 \begin{enumerate}
@@ -240,10 +240,11 @@ make test
     === EXPERIMENTS COMPLETED. Results saved to results.csv ===
     \end{verbatim}
 
+
 \end{enumerate}
 
 
-\section{11. Individual Contributions}
+\section{Individual Contributions}
 Both Samyak Shah and Mahip Parekh contributed equally (50-50) to the design, implementation, testing, and documentation of this project. We pair-programmed for the majority of the core features including the DHT logic, Chain Replication, and the Client-Server communication protocol.
 
 \end{document}
