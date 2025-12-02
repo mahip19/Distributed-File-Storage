@@ -229,6 +229,17 @@ make test
     \end{verbatim}
     \textbf{Expected Output:} You should see logs indicating nodes starting, files being uploaded/downloaded, and a final "ALL TESTS PASSED" message.
 
+
+    \item \textbf{Performance Experiments}:
+
+    Run the Java stress tests to generate the raw data (results.csv).
+
+    \begin{verbatim}
+    bashjava -cp out com.distributed.storage.client.PerformanceExperiments
+    Expected Output:
+    === EXPERIMENTS COMPLETED. Results saved to results.csv ===
+    \end{verbatim}
+
 \end{enumerate}
 
 
